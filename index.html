@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Item Classifier PWA</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 12px;
+            background: #f3f4f6;
+            color: #1f2937;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            box-sizing: border-box;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        h1 { font-size: 1rem; margin: 0; }
+        .header-actions { display: flex; gap: 8px; align-items: center; }
+        #counter { font-size: 0.85rem; color: #6b7280; font-weight: 600; }
+        .export-btn {
+            background: #10b981;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .card {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .meta-info {
+            padding: 8px 12px;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 0.8rem;
+            display: flex;
+            justify-content: space-between;
+        }
+        .map-container {
+            flex: 1;
+            position: relative;
+            background: #e5e7eb;
+            display: flex;
+            flex-direction: column;
+        }
+        .map-container { min-height: 180px; }
+        .map-open { position: absolute; right: 10px; bottom: 10px; z-index: 2; background: white; color: #1d4ed8; padding: 8px 10px; border-radius: 6px; font-size: .85rem; font-weight: 600; text-decoration: none; box-shadow: 0 1px 4px #0003; }
+        .retry-btn { margin-bottom: 8px; padding: 10px; border: 0; border-radius: 6px; background: #2563eb; color: white; font-weight: 600; }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+        .map-fallback {
+            padding: 16px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            gap: 8px;
+        }
+        .map-fallback a {
+            background: #2563eb;
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .classes-container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+        .class-btn {
+            background: white;
+            border: 2px solid #d1d5db;
+            border-radius: 8px;
+            padding: 10px 4px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            cursor: pointer;
+            text-align: center;
+            color: #374151;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .class-btn.selected {
+            background: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
+        .class-btn.delete-btn {
+            background: #fee2e2;
+            color: #dc2626;
+            border-color: #fca5a5;
+        }
+        .nav-buttons {
+            display: flex;
+            gap: 8px;
+        }
+        .nav-btn {
+            flex: 1;
+            background: #e5e7eb;
+            border: none;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .nav-btn.primary {
+            background: #2563eb;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Item Classifier</h1>
+        <div class="header-actions">
+            <span id="counter">Item 0 of 0</span>
+            <button class="export-btn" onclick="exportCSV()">Export CSV</button>
+        </div>
+    </header>
+
+    <div class="card">
+        <div class="meta-info">
+            <div><strong>Set:</strong> <span id="item-set">-</span></div>
+            <div><strong>Cover:</strong> <span id="item-cover">-</span></div>
+            <div><strong>Class:</strong> <span id="item-current">-</span></div>
+        </div>
+        <div class="map-container">
+            <iframe id="map-frame" title="Map location" src="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            <a id="map-open" class="map-open" target="_blank" rel="noopener noreferrer">Open in Google Maps ↗</a>
+        </div>
+        <button id="retry-load" class="retry-btn" onclick="loadData()" hidden>Retry loading</button>
+    </div>
+
+    <div class="classes-container">
+        <button class="class-btn" onclick="selectClass('Phumdi- 6')">Phumdi- 6</button>
+        <button class="class-btn" onclick="selectClass('Water- 4')">Water- 4</button>
+        <button class="class-btn" onclick="selectClass('Paddy -1')">Paddy -1</button>
+        <button class="class-btn" onclick="selectClass('Jhum -2')">Jhum -2</button>
+        <button class="class-btn" onclick="selectClass('Forest -0')">Forest -0</button>
+        <button class="class-btn" onclick="selectClass('Blank - unclassifiable')">Blank - unclassifiable</button>
+        <button class="class-btn delete-btn" style="grid-column: span 2;" onclick="deleteRow()">Delete Row (Unsure)</button>
+    </div>
+
+    <div class="nav-buttons">
+        <button class="nav-btn" onclick="prevItem()">← Back</button>
+        <button class="nav-btn primary" onclick="nextItem()">Proceed →</button>
+    </div>
+
+    <script>
+        let items = [];
+        let currentIndex = 0;
+
+        const STORAGE_KEY = 'classifier_items_v2';
+
+        async function loadData() {
+            const counter = document.getElementById('counter');
+            counter.innerText = 'Loading items…';
+            try {
+                const response = await fetch('candidates.csv', { cache: 'no-store' });
+                if (!response.ok) throw new Error('CSV request failed (' + response.status + ')');
+                const csv = await response.text();
+                const freshItems = parseCSV(csv);
+                if (!freshItems.length) throw new Error('The CSV contains no item rows.');
+
+                let saved = null;
+                try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) {}
+                items = Array.isArray(saved) && saved.length === freshItems.length ? saved : freshItems;
+                if (items === freshItems) saveProgress();
+                renderItem();
+            } catch (err) {
+                console.error('Error loading items:', err);
+                counter.innerText = 'Could not load items';
+                document.getElementById('item-set').innerText = err.message + ' — serve this folder from HTTPS or localhost, then retry.';
+                const retry = document.getElementById('retry-load');
+                retry.hidden = false;
+            }
+        }
+
+        function parseCSV(text) {
+            const rows = [];
+            let row = [], field = '', quoted = false;
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (quoted) {
+                    if (ch === '"' && text[i + 1] === '"') { field += '"'; i++; }
+                    else if (ch === '"') quoted = false;
+                    else field += ch;
+                } else if (ch === '"') quoted = true;
+                else if (ch === ',') { row.push(field); field = ''; }
+                else if (ch === '\n') { row.push(field.replace(/\r$/, '')); rows.push(row); row = []; field = ''; }
+                else field += ch;
+            }
+            if (field.length || row.length) { row.push(field.replace(/\r$/, '')); rows.push(row); }
+            return rows.slice(1).filter(r => r.some(v => v.trim())).map(r => ({
+                lon: r[0] || '', lat: r[1] || '', set: r[2] || '',
+                worldcover: r[3] || '', class: r[4] || '', mapUrl: r[5] || ''
+            }));
+        }
+
+        function saveProgress() {
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }
+            catch (err) { console.error('Could not save progress:', err); }
+        }
+
+        function mapEmbedUrl(item) {
+            const lat = Number(item.lat), lon = Number(item.lon);
+            if (Number.isFinite(lat) && Number.isFinite(lon))
+                return 'https://www.google.com/maps?q=' + encodeURIComponent(lat + ',' + lon) + '&z=18&output=embed';
+            return '';
+        }
+
+        function renderItem() {
+            if (items.length === 0) {
+                document.getElementById('counter').innerText = "No items left";
+                document.getElementById('item-set').innerText = "-";
+                document.getElementById('item-cover').innerText = "-";
+                document.getElementById('item-current').innerText = "-";
+                document.getElementById('map-frame').src = "about:blank";
+                document.getElementById('map-open').hidden = true;
+                return;
+            }
+
+            if (currentIndex >= items.length) currentIndex = items.length - 1;
+            if (currentIndex < 0) currentIndex = 0;
+
+            let item = items[currentIndex];
+            document.getElementById('counter').innerText = `Item ${currentIndex + 1} of ${items.length}`;
+            document.getElementById('item-set').innerText = item.set;
+            document.getElementById('item-cover').innerText = item.worldcover;
+            document.getElementById('item-current').innerText = item.class !== "" ? item.class : "None";
+            
+            const frame = document.getElementById('map-frame');
+            const embedUrl = mapEmbedUrl(item);
+            if (frame.src !== embedUrl) frame.src = embedUrl;
+            const mapLink = document.getElementById('map-open');
+            mapLink.href = item.mapUrl || ('https://www.google.com/maps?q=' + encodeURIComponent(item.lat + ',' + item.lon));
+            mapLink.hidden = !item.mapUrl && !(item.lat && item.lon);
+
+            document.querySelectorAll('.class-btn').forEach(btn => {
+                if (btn.innerText === item.class) {
+                    btn.classList.add('selected');
+                } else {
+                    btn.classList.remove('selected');
+                }
+            });
+        }
+
+        function selectClass(val) {
+            if (items.length === 0) return;
+            items[currentIndex].class = val;
+            saveProgress();
+            setTimeout(() => {
+                if (currentIndex < items.length - 1) {
+                    currentIndex++;
+                    renderItem();
+                }
+            }, 150);
+        }
+
+        function deleteRow() {
+            if (items.length === 0) return;
+            if (confirm("Are you sure you want to delete this row?")) {
+                items.splice(currentIndex, 1);
+                saveProgress();
+                if (currentIndex >= items.length && currentIndex > 0) {
+                    currentIndex--;
+                }
+                renderItem();
+            }
+        }
+
+        function nextItem() {
+            if (currentIndex < items.length - 1) {
+                currentIndex++;
+                renderItem();
+            }
+        }
+
+        function prevItem() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                renderItem();
+            }
+        }
+
+        function exportCSV() {
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "lon,lat,set,worldcover,class\n";
+            
+            items.forEach(row => {
+                let rowData = [row.lon, row.lat, row.set, row.worldcover, `"${row.class}"`];
+                csvContent += rowData.join(",") + "\n";
+            });
+
+            let encodedUri = encodeURI(csvContent);
+            let link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "classified_extra_candidates.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        loadData();
+
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').catch(err => console.warn('Offline cache unavailable:', err));
+        }
+    </script>
+</body>
+</html>
