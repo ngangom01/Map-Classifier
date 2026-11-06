@@ -1,4 +1,5 @@
-Project overview
+**Project overview**
+
 The Item Classifier PWA helps review geographic candidate locations and assign land-cover classes. It loads 360 records from candidates.csv, displays each location on a satellite map, and provides a link to open it in Google Maps.
 
 The app saves classification progress in the browser and lets users navigate records, delete unsure entries, and export the results to CSV. The CSV parser supports quoted map URLs, and the app shows an error and retry option if data fails to load.
