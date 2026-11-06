@@ -7,6 +7,7 @@
     <link rel="manifest" href="./manifest.json">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <style>
@@ -137,6 +138,13 @@
             background: #2563eb;
             color: white;
         }
+        .drive-controls, .batch-controls { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+        .drive-controls { flex-wrap: wrap; }
+        .drive-controls button, .batch-controls button { border: 0; border-radius: 6px; padding: 8px 10px; font-weight: 600; cursor: pointer; }
+        .drive-controls button { background: #e5e7eb; color: #1f2937; }
+        #drive-status { color: #4b5563; font-size: .8rem; }
+        #batch-counter { flex: 1; text-align: center; font-size: .85rem; font-weight: 600; }
+        @media (max-width: 600px) { .drive-controls button { font-size: .75rem; padding: 7px; } }
     </style>
 </head>
 <body>
@@ -162,13 +170,26 @@
     </div>
 
     <div class="classes-container">
-        <button class="class-btn" onclick="selectClass('Phumdi- 6')">Phumdi- 6</button>
-        <button class="class-btn" onclick="selectClass('Water- 4')">Water- 4</button>
-        <button class="class-btn" onclick="selectClass('Paddy -1')">Paddy -1</button>
-        <button class="class-btn" onclick="selectClass('Jhum -2')">Jhum -2</button>
-        <button class="class-btn" onclick="selectClass('Forest -0')">Forest -0</button>
-        <button class="class-btn" onclick="selectClass('Blank - unclassifiable')">Blank - unclassifiable</button>
+        <button class="class-btn" data-code="6" onclick="selectClass('6')">Phumdi - 6</button>
+        <button class="class-btn" data-code="4" onclick="selectClass('4')">Water - 4</button>
+        <button class="class-btn" data-code="1" onclick="selectClass('1')">Paddy - 1</button>
+        <button class="class-btn" data-code="2" onclick="selectClass('2')">Jhum - 2</button>
+        <button class="class-btn" data-code="0" onclick="selectClass('0')">Forest - 0</button>
+        <button class="class-btn" data-code="" onclick="selectClass('')">Blank - unclassifiable</button>
         <button class="class-btn delete-btn" style="grid-column: span 2;" onclick="deleteRow()">Delete Row (Unsure)</button>
+    </div>
+
+    <div class="drive-controls">
+        <button onclick="connectGoogleDrive()">Connect Google Drive</button>
+        <button onclick="saveToDrive()">Save to Drive</button>
+        <button onclick="restoreFromDrive()">Restore from Drive</button>
+        <span id="drive-status" aria-live="polite">Drive not connected</span>
+    </div>
+
+    <div class="batch-controls">
+        <button class="nav-btn" onclick="prevBatch()">← Previous batch</button>
+        <span id="batch-counter">Batch 1 of 1</span>
+        <button class="nav-btn primary" onclick="nextBatch()">Next batch →</button>
     </div>
 
     <div class="nav-buttons">
@@ -181,6 +202,13 @@
         let currentIndex = 0;
         let map = null;
         let marker = null;
+        let datasetFingerprint = '';
+        let accessToken = '';
+        let tokenClient = null;
+        let driveFileId = '';
+        const BATCH_SIZE = 50;
+        const GOOGLE_CLIENT_ID = '428825611289-32bs0te86knfp0ajvt7ctps60nv1che9.apps.googleusercontent.com';
+        const DRIVE_FILE_NAME = 'item-classifier-progress.json';
 
         function initMap() {
             const mapEl = document.getElementById('map');
@@ -194,7 +222,36 @@
             marker = L.marker([24.5555, 93.8066]).addTo(map);
         }
 
-        const STORAGE_KEY = 'classifier_items_v2';
+        const STORAGE_KEY = 'classifier_progress_v3';
+        const LEGACY_STORAGE_KEY = 'classifier_items_v2';
+
+        function normalizeClass(value) {
+            const raw = String(value ?? '').trim();
+            const labels = {
+                'Phumdi- 6': '6', 'Phumdi - 6': '6', 'Phumbi - 6': '6',
+                'Water- 4': '4', 'Water - 4': '4',
+                'Paddy -1': '1', 'Paddy - 1': '1',
+                'Jhum -2': '2', 'Jhum - 2': '2',
+                'Forest -0': '0', 'Forest - 0': '0',
+                'Blank - unclassifiable': ''
+            };
+            if (Object.prototype.hasOwnProperty.call(labels, raw)) return labels[raw];
+            return ['0', '1', '2', '4', '6'].includes(raw) ? raw : '';
+        }
+
+        function normalizeItems(rows) {
+            return rows.map(row => ({
+                lon: String(row.lon ?? ''), lat: String(row.lat ?? ''),
+                set: String(row.set ?? ''), worldcover: String(row.worldcover ?? ''),
+                class: normalizeClass(row.class), mapUrl: String(row.mapUrl ?? '')
+            }));
+        }
+
+        async function fingerprint(text) {
+            const bytes = new TextEncoder().encode(text);
+            const digest = await crypto.subtle.digest('SHA-256', bytes);
+            return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+        }
 
         async function loadData() {
             const counter = document.getElementById('counter');
@@ -205,11 +262,27 @@
                 const csv = await response.text();
                 const freshItems = parseCSV(csv);
                 if (!freshItems.length) throw new Error('The CSV contains no item rows.');
+                datasetFingerprint = await fingerprint(csv);
 
                 let saved = null;
                 try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null'); } catch (_) {}
-                items = Array.isArray(saved) && saved.length === freshItems.length ? saved : freshItems;
-                if (items === freshItems) saveProgress();
+                if (saved?.datasetFingerprint === datasetFingerprint && Array.isArray(saved.items)) {
+                    items = normalizeItems(saved.items);
+                    currentIndex = Number.isInteger(saved.currentIndex) ? saved.currentIndex : 0;
+                } else {
+                    let legacy = null;
+                    try { legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || 'null'); } catch (_) {}
+                    items = normalizeItems(freshItems);
+                    if (Array.isArray(legacy)) {
+                        const oldClasses = new Map(legacy.map(row => [String(row.lon) + ',' + String(row.lat), normalizeClass(row.class)]));
+                        items.forEach(row => {
+                            const key = row.lon + ',' + row.lat;
+                            if (oldClasses.has(key)) row.class = oldClasses.get(key);
+                        });
+                    }
+                    currentIndex = 0;
+                }
+                saveProgress();
                 renderItem();
             } catch (err) {
                 console.error('Error loading items:', err);
@@ -242,7 +315,7 @@
         }
 
         function saveProgress() {
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(items)); }
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ datasetFingerprint, items, currentIndex, savedAt: new Date().toISOString() })); }
             catch (err) { console.error('Could not save progress:', err); }
         }
 
@@ -254,6 +327,7 @@
                 document.getElementById('item-current').innerText = "-";
                 if (marker) marker.closePopup();
                 document.getElementById('map-open').hidden = true;
+                document.getElementById('batch-counter').innerText = 'No batches';
                 return;
             }
 
@@ -261,10 +335,18 @@
             if (currentIndex < 0) currentIndex = 0;
 
             let item = items[currentIndex];
+            const totalBatches = Math.ceil(items.length / BATCH_SIZE);
+            const batchNumber = Math.floor(currentIndex / BATCH_SIZE) + 1;
+            const batchStart = (batchNumber - 1) * BATCH_SIZE + 1;
+            const batchEnd = Math.min(batchNumber * BATCH_SIZE, items.length);
             document.getElementById('counter').innerText = `Item ${currentIndex + 1} of ${items.length}`;
+            document.getElementById('batch-counter').innerText = `Batch ${batchNumber} of ${totalBatches} · items ${batchStart}–${batchEnd}`;
+            document.querySelector('.batch-controls button:first-child').disabled = batchNumber === 1;
+            document.querySelector('.batch-controls button:last-child').disabled = batchNumber === totalBatches;
             document.getElementById('item-set').innerText = item.set;
             document.getElementById('item-cover').innerText = item.worldcover;
-            document.getElementById('item-current').innerText = item.class !== "" ? item.class : "None";
+            item.class = normalizeClass(item.class);
+            document.getElementById('item-current').innerText = item.class !== "" ? item.class : "Blank";
             
             const lat = Number(item.lat), lon = Number(item.lon);
             if (map && marker && Number.isFinite(lat) && Number.isFinite(lon)) {
@@ -278,7 +360,7 @@
             mapLink.hidden = !item.mapUrl && !(item.lat && item.lon);
 
             document.querySelectorAll('.class-btn').forEach(btn => {
-                if (btn.innerText === item.class) {
+                if (btn.dataset.code === item.class) {
                     btn.classList.add('selected');
                 } else {
                     btn.classList.remove('selected');
@@ -288,14 +370,24 @@
 
         function selectClass(val) {
             if (items.length === 0) return;
-            items[currentIndex].class = val;
+            items[currentIndex].class = normalizeClass(val);
             saveProgress();
+            renderItem();
+            const previousIndex = currentIndex;
             setTimeout(() => {
                 if (currentIndex < items.length - 1) {
                     currentIndex++;
+                    saveProgress();
                     renderItem();
+                    syncAfterBatchChange(previousIndex, currentIndex);
                 }
             }, 150);
+        }
+
+        function syncAfterBatchChange(previousIndex, nextIndex) {
+            if (accessToken && Math.floor(previousIndex / BATCH_SIZE) !== Math.floor(nextIndex / BATCH_SIZE)) {
+                saveToDrive();
+            }
         }
 
         function deleteRow() {
@@ -312,15 +404,157 @@
 
         function nextItem() {
             if (currentIndex < items.length - 1) {
+                const previousIndex = currentIndex;
                 currentIndex++;
+                saveProgress();
                 renderItem();
+                syncAfterBatchChange(previousIndex, currentIndex);
             }
         }
 
         function prevItem() {
             if (currentIndex > 0) {
+                const previousIndex = currentIndex;
                 currentIndex--;
+                saveProgress();
                 renderItem();
+                syncAfterBatchChange(previousIndex, currentIndex);
+            }
+        }
+
+        function nextBatch() {
+            if (!items.length) return;
+            const previousIndex = currentIndex;
+            currentIndex = Math.min((Math.floor(currentIndex / BATCH_SIZE) + 1) * BATCH_SIZE, items.length - 1);
+            saveProgress();
+            renderItem();
+            syncAfterBatchChange(previousIndex, currentIndex);
+        }
+
+        function prevBatch() {
+            if (!items.length) return;
+            const previousIndex = currentIndex;
+            currentIndex = Math.max(0, (Math.floor(currentIndex / BATCH_SIZE) - 1) * BATCH_SIZE);
+            saveProgress();
+            renderItem();
+            syncAfterBatchChange(previousIndex, currentIndex);
+        }
+
+        function setDriveStatus(message) {
+            document.getElementById('drive-status').innerText = message;
+        }
+
+        function connectGoogleDrive() {
+            if (!window.google?.accounts?.oauth2) {
+                setDriveStatus('Google sign-in is still loading. Retry in a moment.');
+                return;
+            }
+            if (!tokenClient) {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: GOOGLE_CLIENT_ID,
+                    scope: 'https://www.googleapis.com/auth/drive.file',
+                    callback: async response => {
+                        if (response.error || !response.access_token) {
+                            setDriveStatus('Google Drive connection failed: ' + (response.error || 'no access token'));
+                            return;
+                        }
+                        accessToken = response.access_token;
+                        try {
+                            const file = await findDriveSave();
+                            driveFileId = file?.id || '';
+                            setDriveStatus(file ? 'Connected. Drive save found; choose Restore or Save.' : 'Connected. No Drive save found yet.');
+                        } catch (error) {
+                            setDriveStatus('Connected, but could not check Drive: ' + error.message);
+                        }
+                    }
+                });
+            }
+            tokenClient.requestAccessToken({ prompt: '' });
+        }
+
+        async function driveRequest(url, options = {}) {
+            if (!accessToken) throw new Error('Connect Google Drive first.');
+            const response = await fetch(url, {
+                ...options,
+                headers: { ...(options.headers || {}), Authorization: 'Bearer ' + accessToken }
+            });
+            if (!response.ok) {
+                const detail = await response.text();
+                throw new Error('Drive request failed (' + response.status + '): ' + detail.slice(0, 180));
+            }
+            return response;
+        }
+
+        async function findDriveSave() {
+            const query = "name = '" + DRIVE_FILE_NAME + "' and trashed = false";
+            const params = new URLSearchParams({ q: query, spaces: 'drive', pageSize: '10', fields: 'files(id,name,modifiedTime)' });
+            const response = await driveRequest('https://www.googleapis.com/drive/v3/files?' + params.toString());
+            const result = await response.json();
+            return result.files?.[0] || null;
+        }
+
+        async function saveToDrive() {
+            saveProgress();
+            if (!accessToken) {
+                setDriveStatus('Connect Google Drive before saving.');
+                return;
+            }
+            try {
+                const data = JSON.stringify({
+                    version: 1, datasetFingerprint, items, currentIndex,
+                    savedAt: new Date().toISOString()
+                });
+                let response;
+                if (driveFileId) {
+                    response = await driveRequest('https://www.googleapis.com/upload/drive/v3/files/' + encodeURIComponent(driveFileId) + '?uploadType=media', {
+                        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: data
+                    });
+                } else {
+                    const boundary = 'classifier_' + Date.now();
+                    const metadata = JSON.stringify({ name: DRIVE_FILE_NAME, mimeType: 'application/json' });
+                    const body = new Blob([
+                        '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n', metadata,
+                        '\r\n--' + boundary + '\r\nContent-Type: application/json\r\n\r\n', data,
+                        '\r\n--' + boundary + '--'
+                    ], { type: 'multipart/related; boundary=' + boundary });
+                    response = await driveRequest('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name', {
+                        method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + boundary }, body
+                    });
+                    driveFileId = (await response.json()).id;
+                }
+                setDriveStatus('Saved to Google Drive at ' + new Date().toLocaleTimeString());
+            } catch (error) {
+                setDriveStatus('Save failed: ' + error.message);
+            }
+        }
+
+        async function restoreFromDrive() {
+            if (!accessToken) {
+                setDriveStatus('Connect Google Drive before restoring.');
+                return;
+            }
+            try {
+                if (!driveFileId) {
+                    const file = await findDriveSave();
+                    driveFileId = file?.id || '';
+                }
+                if (!driveFileId) {
+                    setDriveStatus('No saved progress found in Google Drive.');
+                    return;
+                }
+                if (!confirm('Replace this browser’s current progress with the Google Drive save?')) return;
+                const response = await driveRequest('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(driveFileId) + '?alt=media');
+                const saved = await response.json();
+                if (saved.datasetFingerprint !== datasetFingerprint || !Array.isArray(saved.items)) {
+                    throw new Error('The Drive save belongs to a different CSV dataset.');
+                }
+                items = normalizeItems(saved.items);
+                currentIndex = Number.isInteger(saved.currentIndex) ? Math.max(0, Math.min(saved.currentIndex, items.length - 1)) : 0;
+                saveProgress();
+                renderItem();
+                setDriveStatus('Progress restored from Google Drive.');
+            } catch (error) {
+                setDriveStatus('Restore failed: ' + error.message);
             }
         }
 
