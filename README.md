@@ -10,8 +10,10 @@ A lightweight browser app for reviewing geographic candidate locations and assig
 - Supports the classifier's class buttons, back and next navigation, and deleting an unsure row.
 - Groups records into batches of 50 and provides previous and next batch controls.
 - Stores only class codes (`6`, `4`, `1`, `2`, `0`) or an empty value for unclassifiable items.
+- Shows the number classified and the number remaining, including blank-option classifications.
 - Saves progress in browser local storage and exports the current records, including the map URL, to CSV.
 - Connects to Google Drive to save progress manually or automatically when moving between batches, and can restore a matching saved dataset.
+- Provides **Refresh app / clear cache** to unregister this app's service worker and clear its Cache Storage entries while preserving local progress and the Google Drive save.
 - Parses quoted CSV fields so commas in map URLs do not split a record incorrectly.
 - Shows a loading error and retry option if the CSV cannot be loaded.
 - Includes a service worker for caching the app files and a GitHub Actions workflow for GitHub Pages deployment.
@@ -42,3 +44,4 @@ The included workflow uploads the repository root as the static site. The app us
 - To use Drive sync, enable the Google Drive API in the Google Cloud project for the supplied OAuth client ID. Add the deployed site origin (for example, `https://ngangom01.github.io`) to the OAuth client's authorized JavaScript origins and configure the OAuth consent screen. Drive sync uses the `drive.file` scope and stores `item-classifier-progress.json` in the signed-in user's Drive.
 - Drive access tokens are held in memory for the current page session. Use **Connect Google Drive** again after reloading the app.
 - The package contains a GitHub Pages workflow, but it has not been deployed or verified against a GitHub repository. The deployment timeout shown in the supplied screenshot requires the detailed Actions deploy-job log to diagnose further.
+- The service worker checks for updated same-origin files before using cached copies and removes older app caches during activation, which helps Chrome load new deployments.

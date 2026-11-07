@@ -1,4 +1,4 @@
-const CACHE_NAME = 'classifier-store-v2';
+const CACHE_NAME = 'classifier-store-v3';
 const APP_FILES = ['./', './index.html', './manifest.json', './candidates.csv'];
 
 self.addEventListener('install', event => {
@@ -8,13 +8,28 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.filter(key => key.startsWith('classifier-store-') && key !== CACHE_NAME).map(key => caches.delete(key))))
+    caches.keys()
+      .then(keys => Promise.all(keys
+        .filter(key => key.startsWith('classifier-store') && key !== CACHE_NAME)
+        .map(key => caches.delete(key))))
       .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', event => {
+  if (event.request.method !== 'GET') return;
   const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) return;
-  event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request)));
+
+  event.respondWith(
+    fetch(event.request.mode === 'navigate' ? new Request(event.request, { cache: 'no-cache' }) : event.request)
+      .then(response => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(event.request))
+  );
 });

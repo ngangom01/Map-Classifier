@@ -29,8 +29,9 @@
             margin-bottom: 8px;
         }
         h1 { font-size: 1rem; margin: 0; }
-        .header-actions { display: flex; gap: 8px; align-items: center; }
+        .header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; align-items: center; }
         #counter { font-size: 0.85rem; color: #6b7280; font-weight: 600; }
+        #progress-count { font-size: 0.8rem; color: #374151; font-weight: 600; white-space: nowrap; }
         .export-btn {
             background: #10b981;
             color: white;
@@ -142,6 +143,7 @@
         .drive-controls { flex-wrap: wrap; }
         .drive-controls button, .batch-controls button { border: 0; border-radius: 6px; padding: 8px 10px; font-weight: 600; cursor: pointer; }
         .drive-controls button { background: #e5e7eb; color: #1f2937; }
+        .drive-controls .refresh-btn { background: #fef3c7; color: #92400e; }
         #drive-status { color: #4b5563; font-size: .8rem; }
         #batch-counter { flex: 1; text-align: center; font-size: .85rem; font-weight: 600; }
         @media (max-width: 600px) { .drive-controls button { font-size: .75rem; padding: 7px; } }
@@ -152,6 +154,7 @@
         <h1>Item Classifier</h1>
         <div class="header-actions">
             <span id="counter">Item 0 of 0</span>
+            <span id="progress-count">0 classified · 0 remaining</span>
             <button class="export-btn" onclick="exportCSV()">Export CSV</button>
         </div>
     </header>
@@ -183,6 +186,7 @@
         <button onclick="connectGoogleDrive()">Connect Google Drive</button>
         <button onclick="saveToDrive()">Save to Drive</button>
         <button onclick="restoreFromDrive()">Restore from Drive</button>
+        <button class="refresh-btn" onclick="refreshAppCache()">Refresh app / clear cache</button>
         <span id="drive-status" aria-live="polite">Drive not connected</span>
     </div>
 
@@ -240,11 +244,17 @@
         }
 
         function normalizeItems(rows) {
-            return rows.map(row => ({
-                lon: String(row.lon ?? ''), lat: String(row.lat ?? ''),
-                set: String(row.set ?? ''), worldcover: String(row.worldcover ?? ''),
-                class: normalizeClass(row.class), mapUrl: String(row.mapUrl ?? '')
-            }));
+            return rows.map(row => {
+                const rawClass = String(row.class ?? '').trim();
+                const normalizedClass = normalizeClass(rawClass);
+                return {
+                    lon: String(row.lon ?? ''), lat: String(row.lat ?? ''),
+                    set: String(row.set ?? ''), worldcover: String(row.worldcover ?? ''),
+                    class: normalizedClass,
+                    classified: row.classified === true || normalizedClass !== '' || rawClass === 'Blank - unclassifiable',
+                    mapUrl: String(row.mapUrl ?? '')
+                };
+            });
         }
 
         async function fingerprint(text) {
@@ -328,6 +338,7 @@
                 if (marker) marker.closePopup();
                 document.getElementById('map-open').hidden = true;
                 document.getElementById('batch-counter').innerText = 'No batches';
+                document.getElementById('progress-count').innerText = '0 classified · 0 remaining';
                 return;
             }
 
@@ -340,6 +351,8 @@
             const batchStart = (batchNumber - 1) * BATCH_SIZE + 1;
             const batchEnd = Math.min(batchNumber * BATCH_SIZE, items.length);
             document.getElementById('counter').innerText = `Item ${currentIndex + 1} of ${items.length}`;
+            const classifiedCount = items.filter(row => row.classified === true || normalizeClass(row.class) !== '').length;
+            document.getElementById('progress-count').innerText = `${classifiedCount} classified · ${items.length - classifiedCount} remaining`;
             document.getElementById('batch-counter').innerText = `Batch ${batchNumber} of ${totalBatches} · items ${batchStart}–${batchEnd}`;
             document.querySelector('.batch-controls button:first-child').disabled = batchNumber === 1;
             document.querySelector('.batch-controls button:last-child').disabled = batchNumber === totalBatches;
@@ -371,6 +384,7 @@
         function selectClass(val) {
             if (items.length === 0) return;
             items[currentIndex].class = normalizeClass(val);
+            items[currentIndex].classified = true;
             saveProgress();
             renderItem();
             const previousIndex = currentIndex;
@@ -558,6 +572,36 @@
             }
         }
 
+        async function refreshAppCache() {
+            if (!confirm('Clear this app’s cached files and reload the latest deployed version? Your browser progress and Google Drive save will be preserved.')) return;
+            const button = document.querySelector('.refresh-btn');
+            button.disabled = true;
+            button.innerText = 'Refreshing…';
+            try {
+                if ('serviceWorker' in navigator) {
+                    const workerUrl = new URL('sw.js', location.href);
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    const appRegistrations = registrations.filter(registration =>
+                        [registration.active, registration.waiting, registration.installing].some(worker =>
+                            worker && new URL(worker.scriptURL).pathname === workerUrl.pathname
+                        )
+                    );
+                    await Promise.all(appRegistrations.map(registration => registration.unregister()));
+                }
+                if ('caches' in window) {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.filter(key => key.startsWith('classifier-store')).map(key => caches.delete(key)));
+                }
+                const freshUrl = new URL(location.href);
+                freshUrl.searchParams.set('_app_refresh', String(Date.now()));
+                location.replace(freshUrl.href);
+            } catch (error) {
+                button.disabled = false;
+                button.innerText = 'Refresh app / clear cache';
+                setDriveStatus('Cache refresh failed: ' + error.message);
+            }
+        }
+
         function exportCSV() {
             const quote = value => '"' + String(value ?? '').replace(/"/g, '""') + '"';
             const rows = [['lon','lat','set','worldcover','class','map_url'], ...items.map(row =>
@@ -577,7 +621,15 @@
         loadData();
 
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('sw.js').catch(err => console.warn('Offline cache unavailable:', err));
+            let controllerReloading = false;
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (controllerReloading) return;
+                controllerReloading = true;
+                location.reload();
+            });
+            navigator.serviceWorker.register('sw.js')
+                .then(registration => registration.update())
+                .catch(err => console.warn('Offline cache unavailable:', err));
         }
     </script>
 </body>
