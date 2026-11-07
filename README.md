@@ -4,7 +4,7 @@ A lightweight browser app for reviewing geographic candidate locations and assig
 
 ## Features
 
-- Loads the 360 candidate records in `candidates.csv`.
+- Loads the candidate records in `candidates.csv`.
 - Displays each location in a Leaflet map with Esri World Imagery tiles and a marker at the row's latitude and longitude.
 - Keeps the source Google Maps URL from the CSV available through **Open in Google Maps**.
 - Supports the classifier's class buttons, back and next navigation, and deleting an unsure row.
