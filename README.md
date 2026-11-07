@@ -11,8 +11,10 @@ A lightweight browser app for reviewing geographic candidate locations and assig
 - Groups records into batches of 50 and provides previous and next batch controls.
 - Stores only class codes (`6`, `4`, `1`, `2`, `0`) or an empty value for unclassifiable items.
 - Shows the number classified and the number remaining, including blank-option classifications.
+- Lets you update each item's WorldCover value from the standard WorldCover class dropdown; edits are saved locally and synced to Drive when connected.
 - Saves progress in browser local storage and exports the current records, including the map URL, to CSV.
 - Connects to Google Drive to save progress manually or automatically when moving between batches, and can restore a matching saved dataset.
+- Provides **Delete Drive save** to remove the app's saved progress file from Google Drive after confirmation. This does not clear browser progress or change the CSV.
 - Provides **Refresh app / clear cache** to unregister this app's service worker and clear its Cache Storage entries while preserving local progress and the Google Drive save.
 - Parses quoted CSV fields so commas in map URLs do not split a record incorrectly.
 - Shows a loading error and retry option if the CSV cannot be loaded.
@@ -26,7 +28,7 @@ A lightweight browser app for reviewing geographic candidate locations and assig
 lon,lat,set,worldcover,class,map_url
 ```
 
-The app uses `lat` and `lon` to place the map marker. The `map_url` value is retained for opening the original location in Google Maps and for CSV export.
+The app uses `lat` and `lon` to place the map marker. The `worldcover` value can be changed from the selector while classifying, and `map_url` is retained for opening the original location in Google Maps and for CSV export. To start a fresh dataset, replace `candidates.csv` and deploy it; saved local or Drive progress only restores when its dataset fingerprint matches the current CSV.
 
 ## Deploy with GitHub Pages
 

@@ -145,6 +145,8 @@
         .drive-controls button { background: #e5e7eb; color: #1f2937; }
         .drive-controls .refresh-btn { background: #fef3c7; color: #92400e; }
         #drive-status { color: #4b5563; font-size: .8rem; }
+        .cover-editor { display: flex; align-items: center; gap: 6px; }
+        .cover-editor select { max-width: 190px; padding: 5px; border: 1px solid #cbd5e1; border-radius: 5px; }
         #batch-counter { flex: 1; text-align: center; font-size: .85rem; font-weight: 600; }
         @media (max-width: 600px) { .drive-controls button { font-size: .75rem; padding: 7px; } }
     </style>
@@ -162,7 +164,22 @@
     <div class="card">
         <div class="meta-info">
             <div><strong>Set:</strong> <span id="item-set">-</span></div>
-            <div><strong>Cover:</strong> <span id="item-cover">-</span></div>
+            <label class="cover-editor"><strong>WorldCover:</strong>
+                <select id="item-cover" aria-label="WorldCover value" onchange="selectWorldCover(this.value)">
+                    <option value="">Choose value</option>
+                    <option value="10">10 · Tree cover</option>
+                    <option value="20">20 · Shrubland</option>
+                    <option value="30">30 · Grassland</option>
+                    <option value="40">40 · Cropland</option>
+                    <option value="50">50 · Built-up</option>
+                    <option value="60">60 · Bare / sparse vegetation</option>
+                    <option value="70">70 · Snow and ice</option>
+                    <option value="80">80 · Permanent water bodies</option>
+                    <option value="90">90 · Herbaceous wetland</option>
+                    <option value="95">95 · Mangroves</option>
+                    <option value="100">100 · Moss and lichen</option>
+                </select>
+            </label>
             <div><strong>Class:</strong> <span id="item-current">-</span></div>
         </div>
         <div class="map-container">
@@ -186,6 +203,7 @@
         <button onclick="connectGoogleDrive()">Connect Google Drive</button>
         <button onclick="saveToDrive()">Save to Drive</button>
         <button onclick="restoreFromDrive()">Restore from Drive</button>
+        <button class="refresh-btn" onclick="clearDriveSave()">Delete Drive save</button>
         <button class="refresh-btn" onclick="refreshAppCache()">Refresh app / clear cache</button>
         <span id="drive-status" aria-live="polite">Drive not connected</span>
     </div>
@@ -333,7 +351,7 @@
             if (items.length === 0) {
                 document.getElementById('counter').innerText = "No items left";
                 document.getElementById('item-set').innerText = "-";
-                document.getElementById('item-cover').innerText = "-";
+                document.getElementById('item-cover').value = "";
                 document.getElementById('item-current').innerText = "-";
                 if (marker) marker.closePopup();
                 document.getElementById('map-open').hidden = true;
@@ -357,7 +375,13 @@
             document.querySelector('.batch-controls button:first-child').disabled = batchNumber === 1;
             document.querySelector('.batch-controls button:last-child').disabled = batchNumber === totalBatches;
             document.getElementById('item-set').innerText = item.set;
-            document.getElementById('item-cover').innerText = item.worldcover;
+            const coverSelect = document.getElementById('item-cover');
+            const coverValue = String(item.worldcover || '');
+            if (coverValue && !Array.from(coverSelect.options).some(option => option.value === coverValue)) {
+                const customOption = new Option(coverValue + ' · Existing value', coverValue);
+                coverSelect.add(customOption);
+            }
+            coverSelect.value = coverValue;
             item.class = normalizeClass(item.class);
             document.getElementById('item-current').innerText = item.class !== "" ? item.class : "Blank";
             
@@ -396,6 +420,13 @@
                     syncAfterBatchChange(previousIndex, currentIndex);
                 }
             }, 150);
+        }
+
+        function selectWorldCover(value) {
+            if (!items.length) return;
+            items[currentIndex].worldcover = String(value || '');
+            saveProgress();
+            if (accessToken) saveToDrive();
         }
 
         function syncAfterBatchChange(previousIndex, nextIndex) {
@@ -569,6 +600,29 @@
                 setDriveStatus('Progress restored from Google Drive.');
             } catch (error) {
                 setDriveStatus('Restore failed: ' + error.message);
+            }
+        }
+
+        async function clearDriveSave() {
+            if (!accessToken) {
+                setDriveStatus('Connect Google Drive before deleting its save.');
+                return;
+            }
+            if (!confirm('Permanently delete this app’s saved progress file from Google Drive? This cannot be undone. Browser progress and the current CSV will not be changed.')) return;
+            try {
+                if (!driveFileId) {
+                    const file = await findDriveSave();
+                    driveFileId = file?.id || '';
+                }
+                if (!driveFileId) {
+                    setDriveStatus('No Google Drive save exists to delete.');
+                    return;
+                }
+                await driveRequest('https://www.googleapis.com/drive/v3/files/' + encodeURIComponent(driveFileId), { method: 'DELETE' });
+                driveFileId = '';
+                setDriveStatus('Google Drive save deleted. Browser progress is unchanged.');
+            } catch (error) {
+                setDriveStatus('Delete failed: ' + error.message);
             }
         }
 
